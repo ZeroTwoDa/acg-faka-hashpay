@@ -1,0 +1,11 @@
+# Runtime secrets and generated files
+/app/Pay/HashPay/Config/Config.php
+/app/Pay/HashPay/runtime.log
+/dist/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.tmp
