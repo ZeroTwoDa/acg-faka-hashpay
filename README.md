@@ -7,7 +7,7 @@
 为 [ACG-Faka](https://github.com/lizhipay/acg-faka) 开发的 [HashPay](https://github.com/TGDash/HashPay) 加密货币支付模块，支持 RSA-SHA256 请求签名、RSA-OAEP-256 + AES-256-GCM 加密回调，以及商品订单和余额充值的单一回调自动分发。
 
 - **作者：** ZeroTwoDa
-- **当前版本：** 1.0.0
+- **当前版本：** 1.0.1
 - **开源协议：** GPL-3.0-only
 - **适配版本：** ACG-Faka 3.5.6（commit `60b26c56`）
 
@@ -18,7 +18,7 @@
 - 使用商户 RSA 私钥生成 `RSASSA-PKCS1-v1_5 SHA-256` 请求签名。
 - 自动设置 `X-Merchant-Id`、`X-Timestamp`、`X-Signature`。
 - 解密并认证 `RSA-OAEP-256+A256GCM` 回调信封。
-- 内置 phpseclib 纯 PHP RSA 引擎，不依赖 GMP 或 BCMath。
+- 内置 phpseclib，自动使用可用的高性能大整数引擎，并在无 GMP/BCMath 时回退纯 PHP。
 - 单一商户回调自动识别商品订单和余额充值订单。
 - 校验商户、算法、外层及内层时间戳、GCM Tag、币种、状态、金额和订单号。
 - 复用 ACG-Faka 原有事务、支付渠道归属检查、幂等入账和发货流程。
@@ -65,19 +65,28 @@ acg-faka-hashpay/
 │           ├── icon.svg
 │           └── README.md
 ├── .gitignore
+├── tests/
+│   ├── fixtures/
+│   │   ├── test_private.pem
+│   │   └── test_public.pem
+│   ├── stubs/
+│   ├── bootstrap.php
+│   ├── callback_security.php
+│   └── run.php
 ├── LICENSE
 ├── README.md
 ├── RELEASE_NOTES_v1.0.0.md
+├── RELEASE_NOTES_v1.0.1.md
 └── THIRD_PARTY_NOTICES.md
 ```
 
-`Vendor/` 是无 GMP 环境下解密 HashPay 回调所需的依赖，部署时必须完整保留。源码仓库只跟踪空白模板 `Config.example.php`；真实 `Config.php` 和 `runtime.log` 已被 `.gitignore` 排除。
+`Vendor/` 是 HashPay 回调解密所需的依赖，部署时必须完整保留；服务器无需强制安装 GMP/BCMath。源码仓库只跟踪空白模板 `Config.example.php`；真实 `Config.php` 和 `runtime.log` 已被 `.gitignore` 排除。
 
 ## 安装
 
 ### 方式一：使用 Release 安装包
 
-下载 Release 中的 `acg-faka-hashpay-v1.0.0.zip`，解压后将其中的 `app` 目录合并到 ACG-Faka 根目录。Release 安装包已包含空白 `Config.php`，无需手动创建。
+下载 Release 中的 `acg-faka-hashpay-v1.0.1.zip`，解压后将其中的 `app` 目录合并到 ACG-Faka 根目录。Release 安装包已包含空白 `Config.php`，无需手动创建。
 
 ### 方式二：从源码安装
 
@@ -141,6 +150,56 @@ https://你的商城域名/user/api/hashPayNotification/callback.HashPay
 ```
 
 统一入口认证并解密 `merchantNo` 后，会自动查询商品订单表和余额充值表，再委派给 ACG-Faka 原有事务服务。如果两个表意外存在相同订单号，模块会拒绝处理，不会猜测订单类型。
+
+## 回调安全模型
+
+- 外层 `X-HashPay-Timestamp` 与加密信封内层 `timestamp` 都必须落在配置窗口内，默认 `300` 秒，可配置范围为 `60–1800` 秒。
+- AES-256-GCM Tag 负责密文完整性和真实性；任何密文、IV 或 Tag 篡改都会被拒绝。
+- 回调必须属于当前商户，算法必须为 `RSA-OAEP-256+A256GCM`，状态必须为 `paid`，币种必须为 `CNY`。
+- 模块验证远端订单号非空，并将 `merchantNo`、金额和状态交给 ACG-Faka 原有支付服务再次校验。
+- 重复与乱序通知以本地订单状态为准。合法通知在订单已经支付后直接返回 `success`，不会重复入账或发货，也不会触发 HashPay 无意义重试。
+- HashPay 每次重试都会生成新的投递时间戳和加密信封，因此正常延迟重试不会复用已经过期的原始时间戳。
+- 时间窗口用于限制截获信封的可接受时间；最终幂等边界由支付渠道归属、本地订单状态和 ACG-Faka 数据库事务共同保证。
+
+## 密钥轮换
+
+1. 在 HashPay 后台轮换商户密钥。
+2. 立即将新 PKCS#8 私钥保存到 ACG-Faka HashPay 插件配置。
+3. 重启 PHP-FPM 或清除 OPcache，并创建小额测试订单。
+4. 使用旧公钥加密的历史通知无法被新私钥解密；如需补单，应在确认新密钥生效后由 HashPay 重新发送通知。
+5. 不要同时长期保留新旧私钥，也不要把私钥粘贴到 Issue、日志或截图。
+
+## 测试
+
+仓库提供不连接生产数据库、不会创建真实订单的加密回归测试：
+
+```bash
+php tests/run.php
+```
+
+覆盖场景：
+
+- 正常 OAEP-SHA256 + AES-256-GCM 回调
+- 同一加密信封重复解析
+- GCM 密文篡改
+- 超出重放窗口
+- 非 `paid` 状态
+- 错误币种
+- 错误私钥/密钥轮换
+- 金额保真（最终金额匹配由 ACG-Faka 原服务完成）
+
+测试目录中的 RSA 密钥仅用于公开回归测试，绝不能用于真实 HashPay 商户。
+
+### 沙箱/小额联调清单
+
+1. 使用独立 HashPay 测试商户和测试私钥，回调指向非生产或维护窗口内的站点。
+2. 创建最低金额订单，确认 HashPay 与 ACG-Faka 的 `merchantNo`、金额和币种一致。
+3. 完成支付，确认订单只发货或入账一次。
+4. 在 HashPay 后台重发同一通知，确认返回 2xx/`success` 且不重复发货或入账。
+5. 临时将回调窗口设为 `60` 秒，验证过期通知被拒绝，再恢复为 `300` 秒。
+6. 在测试环境使用错误私钥，确认回调失败且日志不泄露密钥；恢复正确私钥后重发通知。
+7. 对商品订单和余额充值分别执行一遍；检查两个表订单号冲突时会安全拒绝。
+8. 查看 `runtime.log`，确认失败路径有原因且不包含私钥、签名或完整密文。
 
 ## 更新与缓存
 

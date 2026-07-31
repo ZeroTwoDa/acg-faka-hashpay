@@ -91,11 +91,19 @@ final class HashPayNotification extends User
             if (!$commodityOrder->pay || $commodityOrder->pay->handle !== $handle) {
                 throw new JSONException('pay handle not found');
             }
+            if ((int)$commodityOrder->status !== 0) {
+                PayConfig::log($handle, 'CALLBACK', '合法重复通知已确认 trade_no=' . $tradeNo);
+                return 'success';
+            }
             return $this->order->callback($handle, $delegatedData);
         }
         if ($rechargeOrder) {
             if (!$rechargeOrder->pay || $rechargeOrder->pay->handle !== $handle) {
                 throw new JSONException('pay handle not found');
+            }
+            if ((int)$rechargeOrder->status !== 0) {
+                PayConfig::log($handle, 'CALLBACK-RECHARGE', '合法重复通知已确认 trade_no=' . $tradeNo);
+                return 'success';
             }
             return $this->recharge->callback($handle, $delegatedData);
         }

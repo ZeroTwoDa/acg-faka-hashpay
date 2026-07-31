@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 return [
     'name' => 'HashPay 加密货币支付',
-    'version' => '1.0.0',
+    'version' => '1.0.1',
     'author' => 'ZeroTwoDa',
     'description' => 'HashPay RSA 签名 API 与 RSA-OAEP-256+A256GCM 加密回调',
     'options' => [

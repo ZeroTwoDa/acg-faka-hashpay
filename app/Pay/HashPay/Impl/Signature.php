@@ -72,9 +72,11 @@ final class Signature implements \App\Pay\Signature
                 throw new \RuntimeException('Incomplete HashPay callback payload');
             }
         }
+        $orderId = trim((string)$payload['orderId']);
         $merchantNo = trim((string)$payload['merchantNo']);
         $currency = strtoupper(trim((string)$payload['currency']));
-        if ($merchantNo === '' || !is_numeric($payload['amount']) || (float)$payload['amount'] <= 0 || $currency !== 'CNY') {
+        $status = strtolower(trim((string)$payload['status']));
+        if ($orderId === '' || $merchantNo === '' || !is_numeric($payload['amount']) || (float)$payload['amount'] <= 0 || $currency !== 'CNY' || $status !== 'paid') {
             throw new \RuntimeException('Invalid HashPay callback business data');
         }
         return $payload;
@@ -116,8 +118,6 @@ final class Signature implements \App\Pay\Signature
         }
         require_once $autoload;
         try {
-            \phpseclib3\Math\BigInteger::setEngine(PHP_INT_SIZE >= 8 ? 'PHP64' : 'PHP32', ['DefaultEngine']);
-            \phpseclib3\Crypt\RSA::forceEngine('PHP');
             $rsa = \phpseclib3\Crypt\PublicKeyLoader::loadPrivateKey($privateKeyPem)
                 ->withPadding(\phpseclib3\Crypt\RSA::ENCRYPTION_OAEP)
                 ->withHash('sha256')
